@@ -14,13 +14,13 @@ params = JobShopRandomParams(2, 2, 2, seed=10)
 
 machines = params.machines
 jobs = params.jobs
-demanda = {0:100, 1:200}
+demanda={0:100,1:200}
+#,2:100,3:200}
 process_time = params.p_times
 setup_time = params.setup
 seq = params.seq
 lotes = params.lotes
 
-V = 50000
 s = setup_time
 
 # definicion de conjuntos
@@ -37,13 +37,16 @@ model = gp.Model('Jobshop')
 
 # variables de decisión continuas
 
-p = model.addVars(triple_mjt,vtype=gp.GRB.CONTINUOUS, name = 'p')
-x = model.addVars(triple_mjt,vtype=gp.GRB.CONTINUOUS, name = 'x')
-y = model.addVars(triple_mjt,vtype=gp.GRB.CONTINUOUS, name = 'y')
+p = model.addVars(triple_mjt,vtype=gp.GRB.INTEGER, name = 'p')
+x = model.addVars(triple_mjt,vtype=gp.GRB.INTEGER, name = 'x')
+y = model.addVars(triple_mjt,vtype=gp.GRB.INTEGER, name = 'y')
 z = model.addVars(quad_mkjt,vtype=gp.GRB.BINARY, name = 'z')
-d = model.addVars(lotes,vtype=gp.GRB.CONTINUOUS, name = 'd')
-C = model.addVar(vtype=gp.GRB.CONTINUOUS, name = 'C')
+d = model.addVars(lotes,vtype=gp.GRB.INTEGER, name = 'd')
+C = model.addVar(vtype=gp.GRB.INTEGER, name = 'C')
 q = model.addVars(doble_jt,vtype=gp.GRB.INTEGER, name = 'q')
+Q = model.addVars(doble_jt,vtype=gp.GRB.BINARY, name = 'Q')
+
+V = sum(process_time[(m,j)]*q[j,t] for m,j,t in triple_mjt)
 
 # constraints
 
@@ -54,10 +57,10 @@ for t in lotes:
                 # Find the previous machine 'o' in the sequence
                 o = seq[j][seq[j].index(m) - 1]
                 # Add the constraint using 'o'
-                model.addConstr(y[m, j, t] >= x[o, j, t] + p[o, j, t])#1
+                model.addConstr(y[m, j, t] >= x[o, j, t] + p[o, j, t]*Q[j,t])#1
 
-model.addConstrs((y[m,j,t] + V*(1-z[m,k,j,t])-x[m,k,t]-p[m,k,t]>=0) for m,k,j,t in quad_mkjt) #2
-model.addConstrs(x[m,j,t]>=y[m,j,t]+s[m,j] for m,j,t in triple_mjt) #3
+model.addConstrs((y[m,j,t] + V*(1-z[m,k,j,t])-x[m,k,t]-p[m,k,t]*Q[j,t]>=0) for m,k,j,t in quad_mkjt) #2
+model.addConstrs(x[m,j,t]>=y[m,j,t]+s[m,j]*Q[j,t] for m,j,t in triple_mjt) #3
 model.addConstrs(z[m,k,j,t]+z[m,j,k,t]==1 for m,k,j,t in quad_mkjt) #4
 model.addConstrs(y[m,j,t]>=d[t-1] for m,j,t in triple_mjt if t!=0) #5
 model.addConstrs(d[t]>=x[m,j,t]+p[m,j,t] for m,j,t in triple_mjt) #6
@@ -71,10 +74,23 @@ model.addConstrs(p[m,j,t]==process_time[(m,j)]*q[j,t] for m,j,t in triple_mjt)
 
 model.addConstrs(gp.quicksum(q[j,t] for t in lotes)==demanda[j] for j in jobs)
 
+model.addConstrs(q[j, t] <= V*Q[j,t] for j, t in doble_jt)
+model.addConstrs(Q[j,t] <= q[j, t] for j, t in doble_jt)
+
 # model.addConstrs(gp.quicksum(p[m,j,t] for t in lotes)<=1200 for m in machines for j in jobs)
 
+# Set the maximum solving time to 40 seconds
+model.setParam('TimeLimit', 40)
 model.setObjective(C,gp.GRB.MINIMIZE)
 model.optimize()
+
+# Check the optimization status
+if model.status == gp.GRB.OPTIMAL:
+    print("Optimal solution found!")
+elif model.status == gp.GRB.TIME_LIMIT:
+    print("Optimization terminated due to time limit.")
+else:
+    print("No solution found within the time limit.")
 
 #--------- DATA FRAME -----------
 results = []
@@ -101,6 +117,9 @@ print("\n El makespan máximo es: ", C.X, "\n")
 # Create a DataFrame from the results list
 results_df = pd.DataFrame(results)
 
+# Set the Pandas option to display all rows (max_rows=None)
+pd.set_option('display.max_rows', None)
+
 # Print the DataFrame
 print(results_df)
 
@@ -123,34 +142,35 @@ for i,j in enumerate(jobs):
     spans = []
     spans_setup = []
     for t,m in doble_tm:
-        # Access 'y' variable
-        y_var = y[m, j, t]
-        if y_var is not None:
-            starts_setup.append(y_var.X)
+        if q[j,t].X>0:        
+            # Access 'y' variable
+            y_var = y[m, j, t]
+            if y_var is not None:
+                starts_setup.append(y_var.X)
 
-        # Access 'x' variable
-        x_var = x[m, j, t]
-        if x_var is not None:
-            machine_index = m
-            machines.append(machine_index)
-            starts.append(x_var.X)
-        
-        # Access 'p' variable
-        p_var = p[m, j, t]
-        if p_var is not None:
-            spans.append(p_var.X)
-        
-        # Access 's' variable
-        s_var = s[m, j]
-        if s_var is not None:
-            spans_setup.append(s_var)
-        
-        if i >= len(colors):
-            i = i % len(colors)
+            # Access 'x' variable
+            x_var = x[m, j, t]
+            if x_var is not None:
+                machine_index = m
+                machines.append(machine_index)
+                starts.append(x_var.X)
+            
+            # Access 'p' variable
+            p_var = p[m, j, t]
+            if p_var is not None:
+                spans.append(p_var.X)
+            
+            # Access 's' variable
+            s_var = s[m, j]
+            if s_var is not None:
+                spans_setup.append(s_var)
+            
+            if i >= len(colors):
+                i = i % len(colors)
 
-        color=colors[i]
-        ax.barh(machines, width=spans_setup, left=starts_setup,color='white', edgecolor='black', hatch="/")
-        ax.barh(machines, width=spans, left=starts, color=color, edgecolor='black', label=f"Job {j}")
+            color=colors[i]
+            ax.barh(machines, width=spans_setup, left=starts_setup,color='white', edgecolor='black', hatch="/")
+            ax.barh(machines, width=spans, left=starts, color=color, edgecolor='black', label=f"Job {j}")
 
 ax.set_yticks(params.machines)
 ax.set_xlabel("Time")

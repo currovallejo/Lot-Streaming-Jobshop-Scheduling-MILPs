@@ -67,7 +67,7 @@ class JobShopParams:
 
 class JobShopRandomParams(JobShopParams):
     
-    def __init__(self, n_machines: int, n_jobs: int, n_lotes: int, t_span=(1, 20), seed=None, t_span_setup=(100,250)):
+    def __init__(self, n_machines: int, n_jobs: int, n_lotes: int, t_span=(1, 20), seed=None, t_span_setup=(50,100)):
         """Class for generating job-shop parameters
 
         Parameters
