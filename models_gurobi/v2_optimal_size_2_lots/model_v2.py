@@ -10,16 +10,16 @@ from params import JobShopRandomParams
 
 # datos del problema
 
-params = JobShopRandomParams(2, 2, 2, seed=10)
+params = JobShopRandomParams(2, 2, 3, seed=10)
 
 machines = params.machines
 jobs = params.jobs
-demanda={0:100,1:200}
-#,2:100,3:200}
+demanda={0:100,1:200,2:100} #,3:200}
 process_time = params.p_times
 setup_time = params.setup
 seq = params.seq
 lotes = params.lotes
+
 
 s = setup_time
 
@@ -29,7 +29,7 @@ doble_tm = gp.tuplelist([(t,m) for t in lotes for m in machines]) # usado para p
 
 doble_jt = gp.tuplelist([(j,t) for j in jobs for t in lotes])
 triple_mjt = gp.tuplelist([(m,j,t) for m in machines for j in jobs for t in lotes])
-quad_mkjt = gp.tuplelist([(m,k,j,t) for m in machines for k in jobs for j in jobs for t in lotes if j!=k])
+penta_mkljt = gp.tuplelist([(m,k,l,j,t) for m in machines for k in jobs for l in lotes for j in jobs for t in lotes if j!=k or t!=l])
 
 # inicialización del modelo
 
@@ -40,8 +40,7 @@ model = gp.Model('Jobshop')
 p = model.addVars(triple_mjt,vtype=gp.GRB.INTEGER, name = 'p')
 x = model.addVars(triple_mjt,vtype=gp.GRB.INTEGER, name = 'x')
 y = model.addVars(triple_mjt,vtype=gp.GRB.INTEGER, name = 'y')
-z = model.addVars(quad_mkjt,vtype=gp.GRB.BINARY, name = 'z')
-d = model.addVars(lotes,vtype=gp.GRB.INTEGER, name = 'd')
+z = model.addVars(penta_mkljt,vtype=gp.GRB.BINARY, name = 'z')
 C = model.addVar(vtype=gp.GRB.INTEGER, name = 'C')
 q = model.addVars(doble_jt,vtype=gp.GRB.INTEGER, name = 'q')
 Q = model.addVars(doble_jt,vtype=gp.GRB.BINARY, name = 'Q')
@@ -57,30 +56,28 @@ for t in lotes:
                 # Find the previous machine 'o' in the sequence
                 o = seq[j][seq[j].index(m) - 1]
                 # Add the constraint using 'o'
-                model.addConstr(y[m, j, t] >= x[o, j, t] + p[o, j, t]*Q[j,t])#1
+                model.addConstr(y[m, j, t] >= x[o, j, t] + p[o, j, t])#1
 
-model.addConstrs((y[m,j,t] + V*(1-z[m,k,j,t])-x[m,k,t]-p[m,k,t]*Q[j,t]>=0) for m,k,j,t in quad_mkjt) #2
-model.addConstrs(x[m,j,t]>=y[m,j,t]+s[m,j]*Q[j,t] for m,j,t in triple_mjt) #3
-model.addConstrs(z[m,k,j,t]+z[m,j,k,t]==1 for m,k,j,t in quad_mkjt) #4
-model.addConstrs(y[m,j,t]>=d[t-1] for m,j,t in triple_mjt if t!=0) #5
-model.addConstrs(d[t]>=x[m,j,t]+p[m,j,t] for m,j,t in triple_mjt) #6
-model.addConstr(C>=d[lotes[-1]]) #7
+model.addConstrs((y[m,j,t]>=x[m,j,t-1]+p[m,j,t-1]) for t in lotes if t!=0) #2
+model.addConstrs((y[m,j,t] + V*(1-z[m,k,l,j,t])-x[m,k,l]-p[m,k,l]>=0) for m,k,l,j,t in penta_mkljt) #3
+model.addConstrs(z[m,k,l,j,t]+z[m,j,t,k,l]==1 for m,k,l,j,t in penta_mkljt) #4
+model.addConstrs(x[m,j,t]>=y[m,j,t]+s[m,j]*Q[j,t] for m,j,t in triple_mjt) #5
 
-model.addConstrs(p[m, j, t] >= 0 for m, j, t in triple_mjt)
-model.addConstrs(x[m, j, t] >= 0 for m, j, t in triple_mjt)
-model.addConstrs(y[m, j, t] >= 0 for m, j, t in triple_mjt)
+model.addConstrs(C>=x[m,j,t]+p[m,j,t] for m,j,t in triple_mjt) #6
 
-model.addConstrs(p[m,j,t]==process_time[(m,j)]*q[j,t] for m,j,t in triple_mjt)
+model.addConstrs(x[m, j, t] >= 0 for m, j, t in triple_mjt) #7
+model.addConstrs(y[m, j, t] >= 0 for m, j, t in triple_mjt) #8
 
-model.addConstrs(gp.quicksum(q[j,t] for t in lotes)==demanda[j] for j in jobs)
+model.addConstrs(p[m,j,t]==process_time[(m,j)]*q[j,t] for m,j,t in triple_mjt) #10
 
-model.addConstrs(q[j, t] <= V*Q[j,t] for j, t in doble_jt)
-model.addConstrs(Q[j,t] <= q[j, t] for j, t in doble_jt)
+model.addConstrs(gp.quicksum(q[j,t] for t in lotes)==demanda[j] for j in jobs) #11
 
-# model.addConstrs(gp.quicksum(p[m,j,t] for t in lotes)<=1200 for m in machines for j in jobs)
+model.addConstrs(q[j, t] <= V*Q[j,t] for j, t in doble_jt) #12
+model.addConstrs(Q[j,t] <= q[j, t] for j, t in doble_jt) #13
+
 
 # Set the maximum solving time to 40 seconds
-model.setParam('TimeLimit', 40)
+# model.setParam('TimeLimit', 120)
 model.setObjective(C,gp.GRB.MINIMIZE)
 model.optimize()
 
@@ -170,7 +167,7 @@ for i,j in enumerate(jobs):
 
             color=colors[i]
             ax.barh(machines, width=spans_setup, left=starts_setup,color='white', edgecolor='black', hatch="/")
-            ax.barh(machines, width=spans, left=starts, color=color, edgecolor='black', label=f"Job {j}")
+            ax.barh(machines, width=spans, left=starts, color=color, edgecolor='black', label=f"Job {j} lote {t}")
 
 ax.set_yticks(params.machines)
 ax.set_xlabel("Time")
