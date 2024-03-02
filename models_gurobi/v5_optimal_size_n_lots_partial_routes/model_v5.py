@@ -1,6 +1,8 @@
 '''
-DESARROLLO DEL MODELO Y REPRESENTACIÓN DE RESULTADOS
-----------------------------------------------------------------------Es el Script principal. Se obtienen los datos, se define el modelo, se resuelve y se imprimen los resultados en un Dataframe y en un Gantt
+MODEL DEVELOPMENT AND RESULTS REPRESENTATION
+----------------------------------------------------------------------
+- This is the main script
+- The data is obtained, the model is defined, solved and the results are printed in a Dataframe and in a Gantt.
 '''
 
 #--------- LIBRARIES ---------
@@ -10,190 +12,165 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from xlsxwriter import Workbook
 
-#--------- OTHER PYTHON FILES USED---------
+#--------- OTHER PYTHON FILES USED ---------
 from params import JobShopRandomParams, job_params_from_json
 import gantt_jobshop_px as gantt
 
-# datos del problema (máquinas, trabajos, lotes, seed= )
-# se pueden obtener generando datos random indicando la semilla o bien obteniendo los datos de un archivo json (previamente generado de igual manera, con la ventaja de que se puede modificar)
+#--------- GET JOBSHOP DATA ---------
+# problem data (machines, jobs, batches, seed= ) is obtained calling Jobshop
+# can be obtained by 
+    # 1. by generating random data indicating the seed 
+    # 2. by obtaining the data from a json file (previously generated in the same way, with the advantage that it can be modified) --> method job_params_from_json
 
-params = JobShopRandomParams(3, 3, 2, seed=6) # m, j, u
+def getJobShopParameters(machines:int, jobs:int, batches:int, seed:int):
+    params = JobShopRandomParams(machines, jobs, batches, seed=seed) # generate jobshop instance
+    # params = job_params_from_json('ist_2m_4j_2u_seed7_v67.json')
 
-# params = job_params_from_json('ist_2m_4j_2u_seed7_v67.json')
+    return params
 
-machines = params.machines
-jobs = params.jobs
-demanda={0:300,1:400,2:100,3:200,4:300,5:200}
-process_time = params.p_times
-setup_time = params.setup
-seq = params.seq
-lotes = params.lotes
-s = setup_time
+#--------- MILP MODEL ---------
+def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the model
+    
+    # renaming parameters
+    machines = params.machines
+    jobs = params.jobs
+    process_time = params.p_times
+    setup_time = params.setup
+    seq = params.seq
+    lotes = params.lotes
+    s = setup_time
 
+    # sets definition
+    set={}
+    set["batches_machines"] = doble_um = gp.tuplelist([(u,m) for u in params.lotes for m in params.machines]) # usado para plotting, no para el modelo
+    set["jobs_batches"] = doble_ju = gp.tuplelist([(j,u) for j in params.jobs for u in params.lotes])
+    set["machines_jobs_batches"] = triple_mju = gp.tuplelist([(m,j,u) for m in params.machines for j in params.jobs if m in params.seq[j] for u in params.lotes])
+    set["machines_jobs_jobs_batches_batches"] = penta_mklju = gp.tuplelist([(m,k,l,j,u) for m in params.machines for k in params.jobs for j in params.jobs if (m in params.seq[j] and m in params.seq[k]) for l in params.lotes for u in params.lotes if j!=k or u!=l])
 
-# definicion de conjuntos
+    print("[SETS] are: \n", set)
+    
+    # model initialization
+    model = gp.Model('Jobshop')
 
-doble_um = gp.tuplelist([(u,m) for u in lotes for m in machines]) # usado para plotting, no para el modelo
+    # continuous decision variables
+    p = model.addVars(set["machines_jobs_batches"],vtype=gp.GRB.CONTINUOUS, name = 'p')
+    x = model.addVars(set["machines_jobs_batches"],vtype=gp.GRB.CONTINUOUS, name = 'x')
+    y = model.addVars(set["machines_jobs_batches"],vtype=gp.GRB.CONTINUOUS, name = 'y')
+    z = model.addVars(penta_mklju,vtype=gp.GRB.BINARY, name = 'z')
+    C = model.addVar(vtype=gp.GRB.INTEGER, name = 'C')
+    q = model.addVars(doble_ju,vtype=gp.GRB.INTEGER, name = 'q')
+    Q = model.addVars(doble_ju,vtype=gp.GRB.BINARY, name = 'Q')
 
-doble_ju = gp.tuplelist([(j,u) for j in jobs for u in lotes])
-triple_mju = gp.tuplelist([(m,j,u) for m in machines for j in jobs if m in seq[j] for u in lotes])
-penta_mklju = gp.tuplelist([(m,k,l,j,u) for m in machines for k in jobs for j in jobs if (m in seq[j] and m in seq[k]) for l in lotes for u in lotes if j!=k or u!=l])
+    V = sum(process_time[(m,j)]*q[j,u] for m,j,u in set["machines_jobs_batches"])
 
-# inicialización del modelo
+    # constraints
+    for u in lotes:
+        for j in jobs:
+            for m in machines:
+                if m in seq[j]:
+                    if seq[j].index(m) > 0:
+                        # Find the previous machine 'o' in the sequence
+                        o = seq[j][seq[j].index(m) - 1]
+                        # Add the constraint using 'o'
+                        model.addConstr(y[m, j, u] >= x[o, j, u] + p[o, j, u])#1
 
-model = gp.Model('Jobshop')
-
-# variables de decisión continuas
-
-p = model.addVars(triple_mju,vtype=gp.GRB.CONTINUOUS, name = 'p')
-x = model.addVars(triple_mju,vtype=gp.GRB.CONTINUOUS, name = 'x')
-y = model.addVars(triple_mju,vtype=gp.GRB.CONTINUOUS, name = 'y')
-z = model.addVars(penta_mklju,vtype=gp.GRB.BINARY, name = 'z')
-C = model.addVar(vtype=gp.GRB.INTEGER, name = 'C')
-q = model.addVars(doble_ju,vtype=gp.GRB.INTEGER, name = 'q')
-Q = model.addVars(doble_ju,vtype=gp.GRB.BINARY, name = 'Q')
-
-V = sum(process_time[(m,j)]*q[j,u] for m,j,u in triple_mju)
-
-# constraints
-for u in lotes:
     for j in jobs:
         for m in machines:
             if m in seq[j]:
-                if seq[j].index(m) > 0:
-                    # Find the previous machine 'o' in the sequence
-                    o = seq[j][seq[j].index(m) - 1]
-                    # Add the constraint using 'o'
-                    model.addConstr(y[m, j, u] >= x[o, j, u] + p[o, j, u])#1
-
-for j in jobs:
-    for m in machines:
-        if m in seq[j]:
-            model.addConstrs((y[m,j,u]>=x[m,j,u-1]+p[m,j,u-1]) for u in lotes if u!=0) #2
-            
-model.addConstrs((y[m,j,u] + V*(1-z[m,k,l,j,u])-x[m,k,l]-p[m,k,l]>=0) for m,k,l,j,u in penta_mklju) #3
-model.addConstrs(z[m,k,l,j,u]+z[m,j,u,k,l]==1 for m,k,l,j,u in penta_mklju) #4
-model.addConstrs(x[m,j,u]>=y[m,j,u]+s[m,j]*Q[j,u] for m,j,u in triple_mju) #5
-
-model.addConstrs(C>=x[m,j,u]+p[m,j,u] for m,j,u in triple_mju) #6
-
-model.addConstrs(x[m, j, u] >= 0 for m, j, u in triple_mju) #7
-model.addConstrs(y[m, j, u] >= 0 for m, j, u in triple_mju) #8
-
-model.addConstrs(p[m,j,u]==process_time[(m,j)]*q[j,u] for m,j,u in triple_mju) #10
-
-model.addConstrs(gp.quicksum(q[j,u] for u in lotes)==demanda[j] for j in jobs) #11
-
-model.addConstrs(q[j, u] <= V*Q[j,u] for j, u in doble_ju) #12
-model.addConstrs(Q[j,u] <= q[j, u] for j, u in doble_ju) #13
-
-
-# Set the maximum solving time to 40 seconds
-model.setParam('TimeLimit', 600)
-model.setObjective(C,gp.GRB.MINIMIZE)
-model.optimize()
-
-# Check the optimization status
-if model.status == gp.GRB.OPTIMAL:
-    print("Optimal solution found!")
-elif model.status == gp.GRB.TIME_LIMIT:
-    print("Optimization terminated due to time limit.")
-else:
-    print("No solution found within the time limit.")
-
-#--------- DATA FRAME -----------
-results = []
-
-# Iterate through the variables and store the variable values in a list
-for u in lotes:
-    for j in jobs:
-        for m in machines:
-            if (m in seq[j] and q[j,u].X>0):
-                results.append({
-                    'Lote': u,
-                    'Job': j,
-                    'Machine': m,                                
-                    'Setup Time': s[m, j],
-                    'Processing Time': process_time[(m, j)],
-                    'Processing Time for u':p[m,j,u].X,
-                    'Start Time (x)': x[m, j, u].X,
-                    'Setup Start Time (y)': y[m, j, u].X,
-                    'Lotsize' : q[j,u].X,
-                    'makespan':x[m,j,u].X + p[m,j,u].X
-                })
-
-print("\n El makespan máximo es: ", C.X, "\n")
-
-# Create a DataFrame from the results list
-results_df = pd.DataFrame(results)
-
-# Set the Pandas option to display all rows (max_rows=None)
-pd.set_option('display.max_rows', None)
-
-# Print the DataFrame
-# print(results_df)
-
-# Export the DataFrame to an Excel file
-# with pd.ExcelWriter(r'C:\Users\Usuario\Documents\MII+MOIGE\TFM - LOCAL/RESULTADOS.xlsx', engine='xlsxwriter') as writer:
-#     results_df.to_excel(writer, sheet_name='Sheet1', index=False)
-
-#---------- PLOTTING ---------------
-
-cmap = mpl.colormaps["Dark2"] # mapa de colores qualitative
-colors = cmap.colors #extraigo la lista de colores asociados al mapa
-
-figsize=[7, 3] 
-dpi=100
-
-fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-for i,j in enumerate(jobs):
-    starts_setup = []
-    machines = []
-    starts = []
-    spans = []
-    spans_setup = []
-    for u,m in doble_um:
-        if (m in seq[j]):
-            if q[j,u].X>0:        
-                # Access 'y' variable
-                y_var = y[m, j, u]
-                if y_var is not None:
-                    starts_setup.append(y_var.X)
-
-                # Access 'x' variable
-                x_var = x[m, j, u]
-                if x_var is not None:
-                    machine_index = m
-                    machines.append(machine_index)
-                    starts.append(x_var.X)
+                model.addConstrs((y[m,j,u]>=x[m,j,u-1]+p[m,j,u-1]) for u in lotes if u!=0) #2
                 
-                # Access 'p' variable
-                p_var = p[m, j, u]
-                if p_var is not None:
-                    spans.append(p_var.X)
-                
-                # Access 's' variable
-                s_var = s[m, j]
-                if s_var is not None:
-                    spans_setup.append(s_var)
-                
-                if i >= len(colors):
-                    i = i % len(colors)
+    model.addConstrs((y[m,j,u] + V*(1-z[m,k,l,j,u])-x[m,k,l]-p[m,k,l]>=0) for m,k,l,j,u in penta_mklju) #3
+    model.addConstrs(z[m,k,l,j,u]+z[m,j,u,k,l]==1 for m,k,l,j,u in penta_mklju) #4
+    model.addConstrs(x[m,j,u]>=y[m,j,u]+s[m,j]*Q[j,u] for m,j,u in triple_mju) #5
 
-                color=colors[i]
-                ax.barh(machines, width=spans_setup, left=starts_setup,color='white', edgecolor='black', hatch="/")
-                ax.barh(machines, width=spans, left=starts, color=color, edgecolor='black', label=f"Job {j} lote {u}")
+    model.addConstrs(C>=x[m,j,u]+p[m,j,u] for m,j,u in triple_mju) #6
 
-ax.set_yticks(params.machines)
-ax.set_xlabel("Time")
-ax.set_ylabel("Machine")
-# x_axe = [i for i in range (0, 61, 2)]
-# ax.set_xticks(x_axe)
-ax.legend(loc='upper left', bbox_to_anchor=(1, 1.03))
-fig.tight_layout() # ensure
+    model.addConstrs(x[m, j, u] >= 0 for m, j, u in triple_mju) #7
+    model.addConstrs(y[m, j, u] >= 0 for m, j, u in triple_mju) #8
 
-# plt.show()
+    model.addConstrs(p[m,j,u]==process_time[(m,j)]*q[j,u] for m,j,u in triple_mju) #10
 
-gantt.print_pxt_gantt(results_df)
+    model.addConstrs(gp.quicksum(q[j,u] for u in lotes)==demand[j] for j in jobs) #11
 
+    model.addConstrs(q[j, u] <= V*Q[j,u] for j, u in doble_ju) #12
+    model.addConstrs(Q[j,u] <= q[j, u] for j, u in doble_ju) #13
+    
+    # Set the maximum solving time to 40 seconds
+    model.setParam('TimeLimit', 40)
+
+    # Set model objective (minimize makespan)
+    model.setObjective(C,gp.GRB.MINIMIZE)
+
+    # Solve model
+    model.optimize()
+
+    # Check the optimization status
+    if model.status == gp.GRB.OPTIMAL:
+        print("Optimal solution found!")
+    elif model.status == gp.GRB.TIME_LIMIT:
+        print("Optimization terminated due to time limit.")
+    else:
+        print("No solution found within the time limit.")
+
+    print("\n El makespan máximo es: ", C.X, "\n")
+
+    #--------- DATA FRAME -----------
+    results = []
+
+    # Iterate through the variables and store the variable values in a list
+    for u in lotes:
+        for j in jobs:
+            for m in machines:
+                if (m in seq[j] and q[j,u].X>0):
+                    results.append({
+                        'Lote': u,
+                        'Job': j,
+                        'Machine': m,                                
+                        'Setup Time': s[m, j],
+                        'Processing Time': process_time[(m, j)],
+                        'Processing Time for u':p[m,j,u].X,
+                        'Start Time (x)': x[m, j, u].X,
+                        'Setup Start Time (y)': y[m, j, u].X,
+                        'Lotsize' : q[j,u].X,
+                        'makespan':x[m,j,u].X + p[m,j,u].X
+                    })
+
+    # Create a DataFrame from the results list
+    results_df = pd.DataFrame(results)
+
+    # Set the Pandas option to display all rows (max_rows=None)
+    pd.set_option('display.max_rows', None)
+
+    # Print the DataFrame
+    # print(results_df)
+
+    # Export the DataFrame to an Excel file
+    # with pd.ExcelWriter(r'C:\Users\Usuario\Documents\MII+MOIGE\TFM - LOCAL/RESULTADOS.xlsx', engine='xlsxwriter') as writer:
+    # results_df.to_excel(writer, sheet_name='Sheet1', index=False)
+
+    return results_df
+
+#--------- PRINT DATA AND RESULTS ---------
+def printData(params, demand):
+    print("--------- JOBSHOP DATA --------- \n")
+    # job shop parameters
+    params.printParams()
+    
+    # demand
+    jobs = [f'Job {i}' for i in range(len(demand))]
+    demandDf = pd.DataFrame(list(demand.values()), columns=['Demand'], index=jobs)
+    print("[DEMAND] The current demand is: \n", demandDf, "\n")
+
+#--------- MAIN ---------
+def main():
+    demand={0:300,1:400,2:100,3:200,4:300,5:200}
+    params = getJobShopParameters(machines=2, jobs=2, batches=2, seed=3)
+
+    printData(params, demand)
+    
+    resultsDf = gurobiModel(params,demand)
+
+    gantt.print_pxt_gantt(resultsDf)
+
+if __name__=="__main__":
+    main()

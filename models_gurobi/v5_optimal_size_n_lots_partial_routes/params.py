@@ -1,6 +1,11 @@
 '''
-DEFINICION DE CLASES PARA MANEJAR PARÁMETROS DEL JOBSHOP
-----------------------------------------------------------------------Se definen clases, métodos y funciones para facilitar el manejo de los parámetros del jobshop en el script donde se define el modelo
+DEFINITION OF CLASSES TO HANDLE JOBSHOP PARAMETERS
+----------------------------------------------------------------------
+- Classes, methods and functions are defined to facilitate the handling of jobshop parameters in the script where the model is defined.
+
+- Two functions are included 
+    - JobShopRandomParams.save_to_json to export the instance parameters to a .json file. 
+    - job_params_from_json to get the parameters of the problem from a .json file
 '''
 
 import numpy as np
@@ -47,7 +52,6 @@ class JobSequence(list):
             super().append(__object)
         else:
             pass
-
 
 class JobShopParams:
     
@@ -141,22 +145,12 @@ class JobShopRandomParams(JobShopParams):
             for m in machines
             for j in jobs
         }  
-
-    # def p_times_lotes(self, machines, jobs, p_times, lotes):
-    #     quantity={0:100, 1:200}
-    #     return {
-    #         (m, j, t): p_times.get((m,j))*(quantity[j]/len(lotes))
-    #         for m in machines
-    #         for j in jobs
-    #         for t in lotes
-    #     }
-
-        
+       
     def printParams(self):
-        print("las máquinas son: \n", self.machines, "\n")
-        print("los trabajos son: \n", self.jobs, "\n")
-        print("las lotes son: \n", self.lotes, "\n")
-        print("el tiempo de trabajo asociado a cada trabajo en cada máquina es: \n")
+        print("[MACHINES]: \n", self.machines, "\n")
+        print("[JOBS]: \n", self.jobs, "\n")
+        print("[BATCHES]: \n", self.lotes, "\n")
+        print("[PROCESS TIMES]the working time associated with each job on each machine is:")
         # Determine the dimensions of the matrix
         max_job = max(key[0] for key in self.p_times.keys())
         max_machine = max(key[1] for key in self.p_times.keys())
@@ -180,7 +174,7 @@ class JobShopRandomParams(JobShopParams):
         # Print the DataFrame
         print(df, "\n")
 
-        print("el tiempo de setup asociado a cada trabajo en cada máquina es: \n")
+        print("[SETUP TIMES] the setup time associated with each job on each machine is:")
         # Determine the dimensions of the matrix
         max_job = max(key[0] for key in self.setup.keys())
         max_machine = max(key[1] for key in self.setup.keys())
@@ -204,12 +198,9 @@ class JobShopRandomParams(JobShopParams):
         # Print the DataFrame
         print(df, "\n")
 
-        print("la secuencia para cada trabajo es: ")
+        print("[SEQ] the sequence for each job is: ")
         for trabajo in self.seq:
             print(trabajo, "|", self.seq[trabajo])
-        
-        print("los tiempos de proceso unitarios son: ")
-        print(self.p_times)
     
     def to_dict(self):
         """Convert class attributes to dictionary"""

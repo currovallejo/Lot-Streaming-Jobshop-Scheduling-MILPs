@@ -1,6 +1,8 @@
 '''
-DESARROLLO DE UNA FUNCION PARA PLOTEAR EL GANTT USANDO PLOTLY EXPRESS
-----------------------------------------------------------------------El gantt en plotly es más claro, más presentable y permite ver más datos.
+DEVELOPMENT OF A GANTT PLOTTING FUNCTION USING PLOTLY EXPRESS
+----------------------------------------------------------------------
+- The gantt in plotly is clearer, more presentable and allows to see more data.
+- The plotly express timeline library is used.
 '''
 
 import plotly.express as px
