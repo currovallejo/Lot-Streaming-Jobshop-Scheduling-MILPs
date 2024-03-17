@@ -123,8 +123,8 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
             for m in machines:
                 if (m in seq[j] and q[j,u].X>0):
                     results.append({
-                        'Lote': u,
                         'Job': j,
+                        'Lote': u,
                         'Machine': m,                                
                         'Setup Time': s[m, j],
                         'Processing Time': process_time[(m, j)],
@@ -163,8 +163,8 @@ def printData(params, demand):
 
 #--------- MAIN ---------
 def main():
-    demand={0:300,1:400,2:100,3:200,4:300,5:200}
-    params = getJobShopParameters(machines=2, jobs=2, batches=2, seed=3)
+    demand={0:20,1:40,2:100,3:200,4:300,5:200}
+    params = getJobShopParameters(machines=3, jobs=3, batches=2, seed=0) #2,2,4,3
 
     printData(params, demand)
     

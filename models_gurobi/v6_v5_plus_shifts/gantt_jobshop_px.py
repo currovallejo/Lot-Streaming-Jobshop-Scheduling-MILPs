@@ -7,7 +7,7 @@ import plotly.express as px
 import pandas as pd
 # from model_v5 import params, p, x, y, q, results_df
 
-def print_pxt_gantt(df_results,shift_time):
+def print_pxt_gantt(df_results,shift_time,n_machines:int,n_jobs:int,seed:int):
     # converting all dataframe numbers to int format
     df = df_results.astype(int)
 
@@ -88,4 +88,4 @@ def print_pxt_gantt(df_results,shift_time):
     # print(fig_s.data)
 
     #fig.show()
-    fig.write_html('jobshop_gantt_' + 'plot.html', auto_open=True) 
+    fig.write_html('%sm_%sj_s%s_jobshop_gantt_plot.html' %(n_machines,n_jobs,seed), auto_open=True) 

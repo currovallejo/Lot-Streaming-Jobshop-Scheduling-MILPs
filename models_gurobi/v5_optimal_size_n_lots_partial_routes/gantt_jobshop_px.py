@@ -89,5 +89,6 @@ def print_pxt_gantt(df_results):
 
     # print(fig_s.data)
 
-    fig.show()
+    # fig.show()
+    fig.write_html('jobshop_gantt_' + 'plot.html', auto_open=True)
 

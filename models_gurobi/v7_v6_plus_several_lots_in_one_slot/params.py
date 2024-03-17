@@ -158,15 +158,15 @@ class JobShopRandomParams(JobShopParams):
         print("las lotes son: \n", self.lotes, "\n")
         print("el tiempo de trabajo asociado a cada trabajo en cada máquina es: \n")
         # Determine the dimensions of the matrix
-        max_job = max(key[0] for key in self.p_times.keys())
-        max_machine = max(key[1] for key in self.p_times.keys())
+        max_job = max(key[1] for key in self.p_times.keys())
+        max_machine = max(key[0] for key in self.p_times.keys())
 
         # Create an empty matrix filled with zeros
         matrix = np.zeros((max_job + 1, max_machine + 1), dtype=int)
 
         # Fill the matrix with the given data
         for key, value in self.p_times.items():
-            matrix[key[0]][key[1]] = value
+            matrix[key[1]][key[0]] = value
 
         # Transpose the matrix to have jobs as rows and machines as columns
         transposed_matrix = matrix.T

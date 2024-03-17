@@ -42,8 +42,8 @@ def gurobiModel(params:JobShopRandomParams, demand:dict, shift_time:int,maxSolve
 
     # estimation of number of lots
     b=0
-    n_lotes=0
-    while b==0:
+    n_lotes=1
+    while b==0 and n_lotes<30:
         n_lotes+=1
         print("while loop iteration number ", n_lotes)
     
@@ -73,13 +73,15 @@ def gurobiModel(params:JobShopRandomParams, demand:dict, shift_time:int,maxSolve
         model = gp.Model('Jobshop')
 
         # continuous decision variables
-        p = model.addVars(triple_mju,vtype=gp.GRB.CONTINUOUS, name = 'p')
-        x = model.addVars(triple_mju,vtype=gp.GRB.CONTINUOUS, name = 'x')
-        y = model.addVars(triple_mju,vtype=gp.GRB.CONTINUOUS, name = 'y')
+        p = model.addVars(triple_mju,vtype=gp.GRB.INTEGER, name = 'p')
+        x = model.addVars(triple_mju,vtype=gp.GRB.INTEGER, name = 'x')
+        y = model.addVars(triple_mju,vtype=gp.GRB.INTEGER, name = 'y')
         z = model.addVars(penta_mklju,vtype=gp.GRB.BINARY, name = 'z')
         C = model.addVar(vtype=gp.GRB.INTEGER, name = 'C')
         q = model.addVars(doble_ju,vtype=gp.GRB.INTEGER, name = 'q')
         Q = model.addVars(doble_ju,vtype=gp.GRB.BINARY, name = 'Q')
+        g = model.addVars(triple_mju,vtype=gp.GRB.INTEGER, name= 'g')
+
 
         V = 2*sum(process_time[(m,j)]*q[j,u] for m,j,u in set["machines_jobs_batches"])
 
@@ -94,12 +96,14 @@ def gurobiModel(params:JobShopRandomParams, demand:dict, shift_time:int,maxSolve
                             # Add the constraint using 'o'
                             model.addConstr(y[m, j, u] >= x[o, j, u] + p[o, j, u])#1
 
-        for j in jobs:
-            for m in machines:
-                if m in seq[j]:
-                    model.addConstrs((y[m,j,u]>=x[m,j,u-1]+p[m,j,u-1]) for u in lotes if u!=0) #2
+        # for j in jobs:
+        #     for m in machines:
+        #         if m in seq[j]:
+        model.addConstrs((y[m,j,u]>=x[m,j,u-1]+p[m,j,u-1]) for m,j,u in triple_mju if u!=0) #2
                     
-        model.addConstrs((y[m,j,u] + V*(1-z[m,k,l,j,u])>=x[m,k,l]+shift_time-s[m,k]) for m,k,l,j,u in penta_mklju if m in seq[j]) #3
+        model.addConstrs((y[m,j,u] + V*(1-z[m,k,l,j,u])>=x[m,k,l]+p[m,k,l]) for m,k,l,j,u in penta_mklju if m in seq[j]) #3
+        model.addConstrs(y[m,j,u]==shift_time*g[m,j,u] for m,j,u in triple_mju if m in seq[j])#3'
+
         model.addConstrs(z[m,k,l,j,u]+z[m,j,u,k,l]==1 for m,k,l,j,u in penta_mklju) #4
         model.addConstrs(x[m,j,u]>=y[m,j,u]+s[m,j]*Q[j,u] for m,j,u in triple_mju) #5
 
@@ -107,15 +111,18 @@ def gurobiModel(params:JobShopRandomParams, demand:dict, shift_time:int,maxSolve
 
         model.addConstrs(x[m, j, u] >= 0 for m, j, u in triple_mju) #7
         model.addConstrs(y[m, j, u] >= 0 for m, j, u in triple_mju) #8
+        model.addConstrs(g[m,j,u] >= 0 for m,j,u in triple_mju)#8'
 
-        model.addConstrs(p[m,j,u]==process_time[(m,j)]*q[j,u] for m,j,u in triple_mju) # parametro
+        model.addConstrs(p[m,j,u]>=process_time[(m,j)]*q[j,u] for m,j,u in triple_mju) # parametro
 
         model.addConstrs(gp.quicksum(q[j,u] for u in lotes)==demand[j] for j in jobs) #10
 
         model.addConstrs(q[j, u] <= V*Q[j,u] for j, u in doble_ju) #11
         model.addConstrs(Q[j,u] <= q[j, u] for j, u in doble_ju) #12
         model.addConstrs(Q[j,u]<=Q[j,u-1] for j,u in doble_ju if u>0) #13
-        model.addConstrs((p[m,j,u]+s[m,j])*Q[j,u]<=shift_time for m,j,u in triple_mju if m in seq[j]) #14
+        # model.addConstrs(s[m,j]+p[m,j,u]<=shift_time for m,j,u in triple_mju) #14
+        model.addConstrs(x[m,j,u]+p[m,j,u]<=shift_time*(g[m,j,u]+1) for m,j,u in triple_mju) #14
+        # model.addConstrs(q[j,u]<=q[j,u-1]*Q[j,u-1] for j,u in doble_ju if u>0) #13'
 
         # Set the maximum solving time to 40 seconds
         model.setParam('TimeLimit', maxSolverTime)
@@ -144,14 +151,14 @@ def gurobiModel(params:JobShopRandomParams, demand:dict, shift_time:int,maxSolve
     results = []
 
     # Iterate through the variables and store the variable values in a list
-    for u in lotes:
-        for j in jobs:
+    for j in jobs:
+        for u in lotes:
             for m in machines:
                 if (m in seq[j] and q[j,u].X>0):
-                    results.append({
-                        'Lote': u,
+                    results.append({                        
                         'Job': j,
-                        'Machine': m,                                
+                        'Machine': m,
+                        'Lote': u,                                
                         'Setup Time': s[m, j],
                         'Processing Time': process_time[(m, j)],
                         'Processing Time for u':p[m,j,u].X,
@@ -171,8 +178,8 @@ def gurobiModel(params:JobShopRandomParams, demand:dict, shift_time:int,maxSolve
     # print(results_df)
 
     # Export the DataFrame to an Excel file
-    # with pd.ExcelWriter(r'C:\Users\Usuario\Documents\MII+MOIGE\TFM - LOCAL/RESULTADOS.xlsx', engine='xlsxwriter') as writer:
-    # results_df.to_excel(writer, sheet_name='Sheet1', index=False)
+    with pd.ExcelWriter(r'C:\Users\Usuario\Documents\MII_MOIGE\TFM_LOCAL\jobshop-lot-sizing-and-scheduling\models_gurobi\v6_v5_plus_shifts/results.xlsx', engine='xlsxwriter') as writer:
+        results_df.to_excel(writer, sheet_name='Sheet1', index=False)
 
     return results_df
 
@@ -192,14 +199,13 @@ def printData(params, demand):
 def main():
     demand={0:20,1:40,2:50,3:200,4:300,5:200}
     #demand={0:300,1:400,2:100,3:200,4:300,5:200}
-    params = getJobShopParameters(machines=2, jobs=3, batches=2, seed=7)
-    shift_time=200
-
+    params = getJobShopParameters(machines=2, jobs=2, batches=2, seed=3)
+    shift_time=300
     printData(params, demand)
     
     resultsDf = gurobiModel(params,demand,shift_time,maxSolverTime=120)
 
-    gantt.print_pxt_gantt(resultsDf,shift_time)
+    gantt.print_pxt_gantt(resultsDf,shift_time, n_machines=len(params.machines),n_jobs=len(params.jobs),seed=params.seed)
 
 if __name__=="__main__":
     main()
