@@ -39,6 +39,7 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
     seq = params.seq
     lotes = params.lotes
     s = setup_time
+    print('setup', s)
 
     # sets definition
     sets={}
@@ -85,7 +86,7 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
             if m in seq[j]:
                 model.addConstrs((y[m,j,u]>=x[m,j,u-1]+p[m,j,u-1]) for u in lotes if (u!=0 and j!=0 and j!=params.jobs[-1])) #6
 
-    model.addConstrs((x[m,k,l] >= x[m,j,u] + p[m,j,u] + s[m,k,j]*Q[k,l] - V*(1-z[m,j,u,k,l])) for m,k,l,j,u in penta_mklju) #7
+    model.addConstrs((x[m,k,l] >= y[m,k,l] + s[m,k,j]*Q[k,l] - V*(1-z[m,j,u,k,l])) for m,k,l,j,u in penta_mklju) #7
     model.addConstrs((y[m,k,l]>=x[m,j,u] + p[m,j,u] - V*(1-z[m,j,u,k,l])) for m,k,l,j,u in penta_mklju)#8
 
     # model.addConstrs(z[m,k,l,j,u]+z[m,j,u,k,l]==1 for m,k,l,j,u in penta_mklju)
@@ -94,26 +95,23 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
         for j in jobs:
             if j!=jobs[-1]:
                 for u in (lotes if j!=0 else [0]):
-                    print('j',j,'u',u)
-                    model.addConstr(gp.quicksum(z[m,j,u,k,l] for k in jobs for l in (lotes if k!=3 else [0]) if k!=0 if (m in seq[j] and m in seq[k]) if (k!=j or l!=u))==1)#9
+                    model.addConstr(gp.quicksum(z[m,j,u,k,l] for k,l in doble_ju if k!=0 if (m in seq[j] and m in seq[k]) if (k!=j or l!=u))==1)#9
     
     for m in machines:
         for k in jobs:
             if k!=0:
-                for l in lotes:
-                        model.addConstr(gp.quicksum(z[m,j,u,k,l] for j in jobs for u in lotes if j!=jobs[-1] if (m in seq[j] and m in seq[k]) if (k!=j or l!=u))==1)#10
+                for l in (lotes if k!=jobs[-1] else [0]):
+                        model.addConstr(gp.quicksum(z[m,j,u,k,l] for j,u in doble_ju if j!=jobs[-1] if (m in seq[j] and m in seq[k]) if (k!=j or l!=u))==1)#10
        
-    for u in lotes:
-        for j in jobs:
-            for m in machines:
-                if m in seq[j]:
-                    if seq[j].index(m) > 0: # if m is not first machine in seq
-                        # Find the previous machine 'o' in the sequence
-                        o = seq[j][seq[j].index(m) - 1]
-                        # Add the constraint using 'o'
-                        model.addConstr(y[m, j, u] >= x[o, j, u] + p[o, j, u])#11
+    for m,j,u in triple_mju:
+        if m in seq[j]:
+            if seq[j].index(m) > 0: # if m is not first machine in seq
+                # Find the previous machine 'o' in the sequence
+                o = seq[j][seq[j].index(m) - 1]
+                # Add the constraint using 'o'
+                model.addConstr(y[m, j, u] >= x[o, j, u] + p[o, j, u])#11
 
-    model.addConstrs(gp.quicksum(q[j,u] for u in lotes)==demand[j] for j in jobs) #12
+    model.addConstrs(gp.quicksum(q[j,u] for u in lotes)==demand[j] for j in jobs[1:-1]) #12
     model.addConstrs(p[m,j,u]==process_time[(m,j)]*q[j,u] for m,j,u in triple_mju) #12
     model.addConstrs(q[j, u] <= V*Q[j,u] for j, u in doble_ju) #13
     model.addConstrs(Q[j,u] <= q[j, u] for j, u in doble_ju) #14
@@ -149,22 +147,20 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
     results = []
 
     # Iterate through the variables and store the variable values in a list
-    for u in lotes:
-        for j in jobs:
-            for m in machines:
-                if (m in seq[j] and q[j,u].X>0):
-                    results.append({
-                        'Lote': u,
-                        'Job': j,
-                        'Machine': m,                                
-                        'Setup Time': x[m, j, u].X - y[m, j, u].X,
-                        'Processing Time': process_time[(m, j)],
-                        'Processing Time for u':p[m,j,u].X,
-                        'Start Time (x)': x[m, j, u].X,
-                        'Setup Start Time (y)': y[m, j, u].X,
-                        'Lotsize' : q[j,u].X,
-                        'makespan':x[m,j,u].X + p[m,j,u].X
-                    })
+    for m,j,u in triple_mju:
+        if (m in seq[j] and q[j,u].X>0):
+            results.append({
+                'Lote': u,
+                'Job': j,
+                'Machine': m,                                
+                'Setup Time': x[m, j, u].X - y[m, j, u].X,
+                'Processing Time': process_time[(m, j)],
+                'Processing Time for u':p[m,j,u].X,
+                'Start Time (x)': x[m, j, u].X,
+                'Setup Start Time (y)': y[m, j, u].X,
+                'Lotsize' : q[j,u].X,
+                'makespan':x[m,j,u].X + p[m,j,u].X
+            })
 
     # Create a DataFrame from the results list
     results_df = pd.DataFrame(results)
@@ -197,7 +193,7 @@ def printData(params, demand):
 #--------- MAIN ---------
 def main():
     demand={0:300,1:100,2:100,3:200,4:300,5:200}
-    params = getJobShopParameters(machines=2, jobs=2, batches=2, seed=5)
+    params = getJobShopParameters(machines=2, jobs=3, batches=1, seed=5)
 
     printData(params, demand)
     
