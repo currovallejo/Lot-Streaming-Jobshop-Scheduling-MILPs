@@ -48,8 +48,8 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
     sets["jobs_batches"] = doble_ju = set(gp.tuplelist([(params.jobs[0], 0)] + [(j, u) for j in params.jobs[1:-1] for u in params.lotes] + [(params.jobs[-1], 0)]))
 
     sets["machines_jobs_batches"] = triple_mju = set(gp.tuplelist([
-    (m, j, u) for m in params.machines for j in params.jobs for u in (params.lotes if j not in [0, params.jobs[-1]] else [0])
-    ]
+    (m, j, u) for m in params.machines for j in params.jobs if m in params.seq[j] for u in (params.lotes if j not in [0, params.jobs[-1]] else [0])
+    ] 
     ))
 
     sets["machines_jobs_jobs_batches_batches"] = penta_mklju = set(gp.tuplelist([
@@ -75,19 +75,19 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
     V = 2*sum(process_time[(m,j)]*q[j,u] for m,j,u in sets["machines_jobs_batches"])
 
     # constraints
-    model.addConstrs(C>=c[m,j,u] for m,j,u in triple_mju)#1
-    model.addConstrs(c[m,j,u]>=x[m,j,u]+p[m,j,u] for m,j,u in triple_mju) #2
-    model.addConstrs(x[m,j,u]>=y[m,j,u] for m,k,l,j,u in penta_mklju if (m in seq[j] and m in seq[k])) #3
-    model.addConstrs(x[m,jobs[-1],0]>=c[m,j,u] for m,j,u in triple_mju if j!=jobs[-1])#4
-    model.addConstrs(y[m,j,u]>=c[m,0,0] for m,j,u in triple_mju if j!=0)#5
+    # model.addConstrs(C>=c[m,j,u] for m,j,u in triple_mju)#1
+    # model.addConstrs(c[m,j,u]>=x[m,j,u]+p[m,j,u] for m,j,u in triple_mju) #2
+    # model.addConstrs(x[m,j,u]>=y[m,j,u] for m,k,l,j,u in penta_mklju if (m in seq[j] and m in seq[k])) #3
+    # model.addConstrs(x[m,jobs[-1],0]>=c[m,j,u] for m,j,u in triple_mju if j!=jobs[-1])#4
+    # model.addConstrs(y[m,j,u]>=c[m,0,0] for m,j,u in triple_mju if j!=0)#5
 
-    for j in jobs:
-        for m in machines:
-            if m in seq[j]:
-                model.addConstrs((y[m,j,u]>=x[m,j,u-1]+p[m,j,u-1]) for u in lotes if (u!=0 and j!=0 and j!=params.jobs[-1])) #6
+    # for j in jobs:
+    #     for m in machines:
+    #         if m in seq[j]:
+    #             model.addConstrs((y[m,j,u]>=x[m,j,u-1]+p[m,j,u-1]) for u in lotes if (u!=0 and j!=0 and j!=params.jobs[-1])) #6
 
-    model.addConstrs((x[m,k,l] >= y[m,k,l] + s[m,k,j]*Q[k,l] - V*(1-z[m,j,u,k,l])) for m,k,l,j,u in penta_mklju) #7
-    model.addConstrs((y[m,k,l]>=x[m,j,u] + p[m,j,u] - V*(1-z[m,j,u,k,l])) for m,k,l,j,u in penta_mklju)#8
+    # model.addConstrs((x[m,k,l] >= y[m,k,l] + s[m,k,j]*Q[k,l] - V*(1-z[m,j,u,k,l])) for m,k,l,j,u in penta_mklju) #7
+    # model.addConstrs((y[m,k,l]>=x[m,j,u] + p[m,j,u] - V*(1-z[m,j,u,k,l])) for m,k,l,j,u in penta_mklju)#8
 
     # model.addConstrs(z[m,k,l,j,u]+z[m,j,u,k,l]==1 for m,k,l,j,u in penta_mklju)
 
@@ -95,13 +95,13 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
         for j in jobs:
             if j!=jobs[-1]:
                 for u in (lotes if j!=0 else [0]):
-                    model.addConstr(gp.quicksum(z[m,j,u,k,l] for k,l in doble_ju if k!=0 if (m in seq[j] and m in seq[k]) if (k!=j or l!=u))==1)#9
+                    model.addConstr(gp.quicksum(z[m,j,u,k,l]*Q[j,u] for k,l in doble_ju if k!=0 if (m in seq[j] and m in seq[k]) if (k!=j or l!=u))==1)#9
     
     for m in machines:
         for k in jobs:
             if k!=0:
                 for l in (lotes if k!=jobs[-1] else [0]):
-                        model.addConstr(gp.quicksum(z[m,j,u,k,l] for j,u in doble_ju if j!=jobs[-1] if (m in seq[j] and m in seq[k]) if (k!=j or l!=u))==1)#10
+                        model.addConstr(gp.quicksum(z[m,j,u,k,l]*Q[j,u] for j,u in doble_ju if j!=jobs[-1] if (m in seq[j] and m in seq[k]) if (k!=j or l!=u))==1)#10
        
     for m,j,u in triple_mju:
         if m in seq[j]:
@@ -111,17 +111,16 @@ def gurobiModel(params:JobShopRandomParams, demand:dict): #builds and solve the 
                 # Add the constraint using 'o'
                 model.addConstr(y[m, j, u] >= x[o, j, u] + p[o, j, u])#11
 
-    model.addConstrs(gp.quicksum(q[j,u] for u in lotes)==demand[j] for j in jobs[1:-1]) #12
-    model.addConstrs(p[m,j,u]==process_time[(m,j)]*q[j,u] for m,j,u in triple_mju) #12
-    model.addConstrs(q[j, u] <= V*Q[j,u] for j, u in doble_ju) #13
-    model.addConstrs(Q[j,u] <= q[j, u] for j, u in doble_ju) #14
-    model.addConstrs(x[m, j, u] >= 0 for m, j, u in triple_mju) #15
-    model.addConstrs(y[m, j, u] >= 0 for m, j, u in triple_mju) #16
-    model.addConstrs(c[m, j, u] >= 0 for m, j, u in triple_mju) #16
-    model.addConstr(C >= 0) #16
+    # model.addConstrs(gp.quicksum(q[j,u] for u in lotes)==demand[j] for j in jobs[1:-1]) #12
+    # model.addConstrs(p[m,j,u]==process_time[(m,j)]*q[j,u] for m,j,u in triple_mju) #13
+    # model.addConstrs(q[j, u] <= V*Q[j,u] for j, u in doble_ju) #14
+    # model.addConstrs(Q[j,u]*10 <= q[j, u] for j, u in doble_ju) #15
+    # model.addConstrs(x[m, j, u] >= 0 for m, j, u in triple_mju) #16
+    # model.addConstrs(y[m, j, u] >= 0 for m, j, u in triple_mju) #17
+    # model.addConstrs(c[m, j, u] >= 0 for m, j, u in triple_mju) #18
 
     # Set the maximum solving time to 40 seconds
-    model.setParam('TimeLimit', 40)
+    model.setParam('TimeLimit', 600)
 
     # Set model objective (minimize makespan)
     model.setObjective(C,gp.GRB.MINIMIZE)
@@ -192,8 +191,8 @@ def printData(params, demand):
 
 #--------- MAIN ---------
 def main():
-    demand={0:300,1:100,2:100,3:200,4:300,5:200}
-    params = getJobShopParameters(machines=2, jobs=3, batches=1, seed=5)
+    demand={0:300,1:300,2:300,3:300,4:300,5:300}
+    params = getJobShopParameters(machines=2, jobs=2, batches=2, seed=6)
 
     printData(params, demand)
     
