@@ -6,12 +6,13 @@ from disjunctive import DisjModel
 import sys
 
 # Instantiate random params of a 4x3 problem
-params = JobShopRandomParams(3, 3, seed=9) # m, j, seed
+params = JobShopRandomParams(2, 2, 2, seed=10) # m, j, t, seed
 params.printParams()
+print(params.p_times_tandas)
 
 disj_model = DisjModel(params)
 
-solver = pyo.SolverFactory("cbc", options=dict(cuts="on", sec=120))
+solver = pyo.SolverFactory("glpk", options=dict(cuts="on", sec=40))
 res = solver.solve(disj_model, tee=False)
 print(res)
  
